@@ -6,14 +6,18 @@ authors = [
     {name = "qianbeijin",email = "2350105528@qq.com"}
 ]
 
-requires-python = ">=3.11"
+requires-python = ">=3.11,<4.0"
 dependencies = [
     "fastapi (>=0.128.0,<0.129.0)",
     "uvicorn (>=0.40.0,<0.41.0)",
     "httpx (>=0.28.1,<0.29.0)",
     "pydantic-settings (>=2.12.0,<3.0.0)",
     "python-dotenv (>=1.2.1,<2.0.0)",
-    "openai (>=2.15.0,<3.0.0)"
+    "pinecone-client (>=6.0.0,<7.0.0)",
+    "langchain (>=1.2.6,<2.0.0)",
+    "langchain-community (>=0.4.1,<0.5.0)",
+    "langchain-openai (>=1.1.7,<2.0.0)",
+    "pypdf (>=6.6.0,<7.0.0)"
 ]
 
 
