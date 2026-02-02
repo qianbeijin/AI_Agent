@@ -3,8 +3,14 @@ from fastapi import FastAPI
 from app.api.v1.endpoints import chat 
 # 导入 CORS 中间件
 from fastapi.middleware.cors import CORSMiddleware
+from app.core.database import engine, Base
+from app.models import chat as chat_model # 引入你刚才写的 chat.py 模型文件
 
 app = FastAPI(title="AI Agent Backend")
+
+# --- 关键步骤：自动建表 ---
+# 这行代码会扫描所有继承自 Base 的模型，并在数据库中创建对应的表
+Base.metadata.create_all(bind=engine)
 
 # 允许跨域配置
 app.add_middleware(
@@ -23,4 +29,4 @@ app.include_router(chat.router, prefix="/api/v1", tags=["Chat"])
 
 @app.get("/")
 def root():
-    return {"message": "AI Backend is running!"}
+    return {"message": "AI Backend is running!"}                                                                             

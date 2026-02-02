@@ -10,6 +10,10 @@ class Settings(BaseSettings):
     # 1. AI 相关配置 (变量名必须和 .env 中完全一致)
     DEEPSEEK_API_KEY: str = Field(..., description="DeepSeek API 密钥")
     DEEPSEEK_API_URL: str = Field(default="https://api.deepseek.com")
+
+    # 添加缺失的字段
+    PINECONE_API_KEY: str
+    PINECONE_ENV: str
     
     # 2. 项目基础配置
     PROJECT_NAME: str = "AI_Agent"

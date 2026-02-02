@@ -10,11 +10,15 @@ import ChatMain from './components/ChatMain.vue'
 </template>
 
 <style>
-/* 全局样式重置 (可选，防止某些默认边距) */
-body, html {
-  margin: 0;
+/* 确保根环境不溢出 */
+html, body, #app {
+  margin: 0 auto;
   padding: 0;
-  height: 100%;
-  width: 100%;
+  overflow: hidden; /* 禁止全局滚动 */
+}
+
+/* 统一盒模型，防止 padding 撑开宽高 */
+* {
+  box-sizing: border-box;
 }
 </style>

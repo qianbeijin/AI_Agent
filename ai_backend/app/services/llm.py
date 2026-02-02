@@ -1,5 +1,6 @@
 from openai import AsyncOpenAI
 from app.core.config import settings
+from typing import List
 
 # 实例化客户端
 client = AsyncOpenAI(
@@ -7,15 +8,17 @@ client = AsyncOpenAI(
     base_url=settings.DEEPSEEK_API_URL
 )
 
-async def get_deepseek_response(userInput: str) -> str:
+async def get_deepseek_response(messages: List[dict]) -> str:
+    """
+    发送对话历史给 DeepSeek
+    :param messages: [{"role": "user", "content": "..."}, ...]
+    """
     try:
         response = await client.chat.completions.create(
             model="deepseek-chat", # 或者 deepseek-coder
-            messages=[
-                {"role": "system", "content": "你是一个专业的AI助手。"},
-                {"role": "user", "content": userInput}
-            ],
-            stream=False # 先做非流式，下周教你做流式(SSE)
+            messages=messages,
+            temperature=0.7,
+            stream=False # 非流式
         )
         return response.choices[0].message.content
     except Exception as e:
