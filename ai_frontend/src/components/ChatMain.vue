@@ -1,13 +1,12 @@
 <script setup lang="ts">
 import { ref, nextTick, watch } from 'vue'
-import axios from 'axios'
 import { ElMessage, ElMessageBox } from 'element-plus'
 // 引入图标：确保你安装了 @element-plus/icons-vue
 import { Cpu, User, Delete, Top } from '@element-plus/icons-vue'
 
 // --- 数据接口 ---
 interface ChatMessage {
-  role: 'user' | 'ai'
+  role: 'user' | 'assistant'
   content: string
 }
 
@@ -18,38 +17,77 @@ const isLoading = ref(false)
 const scrollRef = ref<HTMLElement | null>(null)
 const messageList = ref<ChatMessage[]>([
   { 
-    role: 'ai', 
+    role: 'assistant', 
     content: '你好！我是 DeepSeek AI 助手。有什么我可以帮你的吗？' 
   }
 ])
 
-// --- 核心逻辑 ---
+// 核心逻辑
 const handleSend = async () => {
   const content = userInput.value.trim()
   if (!content || isLoading.value) return
 
-  // 1. 用户消息上屏
-  messageList.value.push({ role: 'user', content })
+  // 1. 用户消息立即上屏
+  messageList.value.push({ role: 'user', content: content })
   userInput.value = ''
   isLoading.value = true
-  scrollToBottom()
+  scrollToBottom() // 滚到底部
 
   try {
-    // 2. 发送请求 (根据你的后端地址修改)
-    const res = await axios.post('http://127.0.0.1:8000/api/v1/chat', {
-      message: content,
-      session_id: sessionId.value ? sessionId.value : null
+    // --- 关键变化 1: 放弃 axios，改用原生 fetch ---
+    const response = await fetch('http://127.0.0.1:8000/api/v1/chat', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        message: content,
+        // 如果有 session_id 就带上，没有传 null
+        session_id: sessionId.value ? sessionId.value : null 
+      })
     })
-    
-    // 3. 接收响应
-    if (res.data && res.data.answer) {
-      sessionId.value = res.data.session_id
-      messageList.value.push({ role: 'ai', content: res.data.answer })
-      localStorage.setItem('session_id', sessionId.value)
+
+    if (!response.ok) {
+      throw new Error('Network response was not ok')
     }
+    isLoading.value = false
+
+    // --- 关键变化 2: 从响应头里抓取 Session ID ---
+    // 因为流式响应体里全是乱码，ID 只能藏在 Header 里
+    const newSessionId = response.headers.get('X-Session-Id')
+    if (newSessionId) {
+      sessionId.value = newSessionId
+    }
+
+    // --- 关键变化 3: 创建流式读取器 ---
+    const reader = response.body?.getReader()
+    const decoder = new TextDecoder() // 解码器：把二进制转成中文
+
+    if (!reader) return
+
+    // 先放一个空的 AI 消息占位，准备接收文字
+    messageList.value.push({ role: 'assistant', content: '' })
+    // 获取刚刚 push 进去的那条消息的引用 (指针)
+    const currentAiMessage = messageList.value[messageList.value.length - 1]
+
+    // --- 关键变化 4: 死循环读取流 ---
+    while (true) {
+      // read() 会返回两个值：done (是否结束), value (这一段二进制数据)
+      const { done, value } = await reader.read()
+      
+      if (done) break // 如果流结束了，跳出循环
+
+      // 解码并拼接到当前消息上
+      const text = decoder.decode(value, { stream: true })
+      currentAiMessage.content += text
+
+      // 每蹦出一个字，就自动滚到底部
+      scrollToBottom() 
+    }
+
   } catch (error) {
-    ElMessage.error('服务连接失败')
-    messageList.value.push({ role: 'ai', content: '🔴 网络连接异常，请检查后端服务。' })
+    console.error(error)
+    messageList.value.push({ role: 'assistant', content: '🔴 网络连接异常，请稍后重试。' })
   } finally {
     isLoading.value = false
     scrollToBottom()
@@ -83,8 +121,8 @@ const clearHistory = () => {
 <template>
   <div class="flex flex-col h-screen w-full bg-white overflow-hidden font-sans">
     
-    <header class="shrink-0  bg-white border-b border-gray-100 flex items-center justify-center px-6 relative z-1 py-4">
-      <div class="max-w-4xl w-full flex items-center justify-between">
+    <header class="shrink-0 bg-white border-b border-gray-100 flex items-center justify-center px-6 relative z-1 py-4">
+       <div class="max-w-4xl w-full flex items-center justify-between">
         <div class="flex items-center gap-3">
           <div class="w-10 h-10 bg-blue-50/50 rounded-xl flex items-center justify-center border border-blue-100">
              <el-icon :size="22" class="text-blue-600"><Cpu /></el-icon>
@@ -97,15 +135,14 @@ const clearHistory = () => {
             </div>
           </div>
         </div>
-
         <el-button circle plain size="small" class="!border-gray-200 hover:!bg-red-50 hover:!text-red-500 hover:!border-red-200 transition-colors" @click="clearHistory">
           <el-icon><Delete /></el-icon>
         </el-button>
       </div>
     </header>
 
-    <main class="flex-1 min-h-0 overflow-y-auto bg-[#f8f9fa] scroll-smooth">
-      <div class="max-w-3xl mx-auto px-4 py-8 flex flex-col gap-6">
+    <main class="flex-1 overflow-y-auto bg-[#f8f9fa] scroll-smooth">
+      <div class="w-2xl mx-auto px-4 py-8 flex flex-col gap-6">
         
         <div 
           v-for="(msg, index) in messageList" 
@@ -114,7 +151,7 @@ const clearHistory = () => {
           :class="msg.role === 'user' ? 'justify-end' : 'justify-start'"
         >
           <div 
-            class="flex items-start gap-3 max-w-[85%] md:max-w-[75%]"
+            class="flex items-start gap-3 max-w-[85%] md:max-w-[75%] min-w-0"
             :class="msg.role === 'user' ? 'flex-row-reverse' : 'flex-row'"
           >
             <div 
@@ -126,9 +163,10 @@ const clearHistory = () => {
               </el-icon>
             </div>
 
-            <div class="flex flex-col" :class="msg.role === 'user' ? 'items-end' : 'items-start'">
+            <div class="flex flex-col min-w-0" :class="msg.role === 'user' ? 'items-end' : 'items-start'">
+              
               <div 
-                class="px-4 py-3 rounded-2xl text-[15px] leading-7 shadow-[0_2px_8px_rgba(0,0,0,0.04)] break-words whitespace-pre-wrap text-left"
+                class="px-4 py-3 rounded-2xl text-[15px] leading-7 shadow-[0_2px_8px_rgba(0,0,0,0.04)] break-words whitespace-pre-wrap text-left max-w-full overflow-hidden"
                 :class="msg.role === 'user' 
                   ? 'bg-blue-600 text-white rounded-tr-none' 
                   : 'bg-white border border-gray-100 text-gray-800 rounded-tl-none'"
@@ -159,7 +197,7 @@ const clearHistory = () => {
     </main>
 
     <footer class="shrink-0 bg-white pt-2 pb-6 px-4">
-      <div class="max-w-3xl mx-auto w-full">
+        <div class="max-w-3xl mx-auto w-full">
         <div class="relative flex items-end gap-2 bg-gray-100/50 hover:bg-gray-100 focus-within:bg-white focus-within:ring-2 focus-within:ring-blue-100 border border-transparent focus-within:border-blue-500 rounded-[24px] px-2 py-2 transition-all duration-200">
           
           <el-input
