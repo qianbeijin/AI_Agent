@@ -1,40 +1,46 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
+from fastapi.responses import StreamingResponse  # 👈 核心组件
 from sqlalchemy.orm import Session
-from app.core.database import get_db          # 1. 引入拿连接的工具
-from app.schemas.chat import ChatRequest, ChatResponse
-from app.services.llm import get_deepseek_response
-from app.services.memory import MemoryService # 2. 引入 Service
+from app.core.database import get_db
+from app.schemas.chat import ChatRequest
+from app.services.memory import MemoryService
 
 router = APIRouter()
 
-@router.post("/chat", response_model=ChatResponse)
+@router.post("/chat") # 注意：这里去掉了 response_model=ChatResponse，因为返回的是流
 async def chat_endpoint(
     request: ChatRequest, 
-    db: Session = Depends(get_db) # 3. 依赖注入：FastAPI 自动帮你拿一个数据库连接
+    db: Session = Depends(get_db)
 ):
-    # --- 1. 处理 Session ID ---
+    # 1. 确定 Session ID
     session_id = request.session_id
     if not session_id:
         session_id = MemoryService.create_session()
 
-    # --- 2. 调用 Service 获取历史 ---
-    # 关键点：把 db 传给 Service
-    history = MemoryService.get_history(db, session_id) 
-
-    # --- 3. 组装 LLM 请求 ---
-    current_message = {"role": "user", "content": request.message}
+    # 2. 准备上下文 (System + History)
+    history = MemoryService.get_history(db, session_id)
     system_prompt = {"role": "system", "content": "你是一个乐于助人的 AI 编程助手。"}
+    current_message = {"role": "user", "content": request.message}
+    
     full_context = [system_prompt] + history + [current_message]
 
-    # --- 4. 调用 AI ---
-    ai_content = await get_deepseek_response(full_context)
-
-    # --- 5. 调用 Service 存入数据库 ---
-    # 关键点：再次把 db 传给 Service，让它去存
+    # 3. 【关键变化】先存用户的消息
+    # 在流开始之前，先把用户说的话落库，确保数据安全
     MemoryService.add_message(db, session_id, "user", request.message)
-    MemoryService.add_message(db, session_id, "ai", ai_content)
 
-    return ChatResponse(
-        session_id=session_id,
-        answer=ai_content
+    # 4. 定义流式生成器 (闭包函数)
+    # 我们在这里调用 Service 层的 wrapper，把 db 传进去
+    async def generate():
+        # 调用 Service 层写好的“边吐字边存库”的方法
+        # 注意：你需要确保 memory.py 里有 stream_and_save_wrapper 这个方法
+        async for chunk in MemoryService.stream_and_save_wrapper(db, session_id, full_context):
+            yield chunk
+
+    # 5. 返回流式响应
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream", # 👈 告诉浏览器：这是流，别关连接
+        headers={
+            "X-Session-Id": session_id  # 👈 技巧：把 Session ID 藏在响应头里传回去
+        }
     )

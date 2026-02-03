@@ -19,8 +19,10 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],  # 允许 GET, POST, PUT 等所有方法
     allow_headers=["*"],  # 允许所有 Header\
+    # --- 核心修改点 ---
+    # 必须显式列出允许前端 JS 读取的自定义 Header
+    expose_headers=["X-Session-Id"] 
 )
-
 
 # 注册路由
 # prefix="/api/v1" 意味着这个文件里的所有接口地址都要加上这个前缀

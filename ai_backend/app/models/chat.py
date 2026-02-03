@@ -14,7 +14,7 @@ class ChatMessage(Base):
     # session_id: 必须要加索引，因为我们总是通过 session_id 来查聊天记录
     session_id = Column(String(50), index=True, nullable=False)
     
-    # role: 'user' 或 'ai'，长度不长，用 String
+    # role: 'user' 或 'assistant'，长度不长，用 String
     role = Column(String(20), nullable=False)
     
     # content: 内容可能很长，必须用 Text 类型

@@ -1,6 +1,7 @@
 from sqlalchemy.orm import Session
 from app.models.chat import ChatMessage
 import uuid
+from app.services.llm import get_deepseek_response
 
 # 限制上下文长度（防止 Token 爆炸）
 MAX_HISTORY_LEN = 20 
@@ -37,3 +38,21 @@ class MemoryService:
     @staticmethod
     def create_session() -> str:
         return str(uuid.uuid4())
+    
+    @staticmethod
+    async def stream_and_save_wrapper(db, session_id: str, messages: list):
+        """
+        包装器生成器：
+        1. 转发 LLM 的流给前端
+        2. 收集完整回复并存入数据库
+        """
+        full_response = ""
+        
+        # 调用上面写的 LLM 流
+        async for chunk in get_deepseek_response(messages):
+            full_response += chunk  # 偷偷拼接
+            yield chunk             # 继续往前端吐字
+
+        # --- 当流结束（循环退出）后，执行存库操作 ---
+        # 注意：这里调用我们昨天写的 add_message
+        MemoryService.add_message(db, session_id, "assistant", full_response)

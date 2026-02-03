@@ -14,13 +14,18 @@ async def get_deepseek_response(messages: List[dict]) -> str:
     :param messages: [{"role": "user", "content": "..."}, ...]
     """
     try:
-        response = await client.chat.completions.create(
+        response = await client.chat.completions.create(  
             model="deepseek-chat", # 或者 deepseek-coder
             messages=messages,
             temperature=0.7,
-            stream=False # 非流式
+            stream=True # 开启流式开关
         )
-        return response.choices[0].message.content
+        # 异步遍历流中的每一个片段 (Chunk)
+        async for chunk in response:
+            # 提取当前片段的文字内容
+            content = chunk.choices[0].delta.content
+            if content:
+                yield content  # 👈 关键：每产生一个字就吐出去
     except Exception as e:
         print(f"Error calling DeepSeek: {e}")
-        return "AI 大脑掉线了，请稍后再试。"
+        yield "AI 大脑掉线了，请稍后再试。"
