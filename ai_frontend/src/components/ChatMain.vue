@@ -3,6 +3,11 @@ import { ref, nextTick, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 // 引入图标：确保你安装了 @element-plus/icons-vue
 import { Cpu, User, Delete, Top } from '@element-plus/icons-vue'
+// 引入markdown
+import MarkdownIt from 'markdown-it'
+import hljs from 'highlight.js'
+// 选择一个你喜欢的代码高亮主题（例如 github-dark 或 atom-one-dark）
+import 'highlight.js/styles/github-dark.css'
 
 // --- 数据接口 ---
 interface ChatMessage {
@@ -21,6 +26,25 @@ const messageList = ref<ChatMessage[]>([
     content: '你好！我是 DeepSeek AI 助手。有什么我可以帮你的吗？' 
   }
 ])
+
+// 初始化 markdown-it，并集成 highlight.js
+const md = new MarkdownIt({
+  html: true,        // 允许 HTML 标签（用于更复杂的渲染）
+  linkify: true,     // 自动将 URL 转为链接
+  typographer: true, 
+  highlight: function (str, lang) {
+    // 如果指定了语言，且 highlight.js 支持该语言
+    if (lang && hljs.getLanguage(lang)) {
+      try {
+        return '<pre><code class="hljs">' +
+               hljs.highlight(str, { language: lang, ignoreIllegals: true }).value +
+               '</code></pre>';
+      } catch (__) {}
+    }
+    // 默认处理
+    return '<pre><code class="hljs">' + md.utils.escapeHtml(str) + '</code></pre>';
+  }
+})
 
 // 核心逻辑
 const handleSend = async () => {
@@ -166,12 +190,12 @@ const clearHistory = () => {
             <div class="flex flex-col min-w-0" :class="msg.role === 'user' ? 'items-end' : 'items-start'">
               
               <div 
-                class="px-4 py-3 rounded-2xl text-[15px] leading-7 shadow-[0_2px_8px_rgba(0,0,0,0.04)] break-words whitespace-pre-wrap text-left max-w-full overflow-hidden"
+                class="px-4 py-2.5 rounded-2xl text-[15px] leading-6 shadow-[0_2px_8px_rgba(0,0,0,0.04)] break-words text-left max-w-full overflow-hidden"
                 :class="msg.role === 'user' 
                   ? 'bg-blue-600 text-white rounded-tr-none' 
                   : 'bg-white border border-gray-100 text-gray-800 rounded-tl-none'"
+                v-html="md.render(msg.content)"
               >
-                {{ msg.content }}
               </div>
             </div>
           </div>
@@ -263,5 +287,40 @@ main::-webkit-scrollbar-thumb {
 }
 main::-webkit-scrollbar-thumb:hover {
   background-color: #d1d5db;
+}
+
+/* --- Markdown 样式重置 (关键修复) --- */
+
+/* 1. 消除 Markdown 内部 p 标签默认的上下边距 */
+:deep(.markdown-body p) {
+  margin-top: 0.5em;
+  margin-bottom: 0.5em;
+}
+
+/* 2. 只有第一行和最后一行的 p 标签，彻底去掉边距，紧贴气泡边缘 */
+:deep(.markdown-body > *:first-child) {
+  margin-top: 0 !important;
+}
+
+:deep(.markdown-body > *:last-child) {
+  margin-bottom: 0 !important;
+}
+
+/* 3. 链接颜色 */
+:deep(.markdown-body a) {
+  color: #2563eb; /* blue-600 */
+  text-decoration: underline;
+}
+
+/* 4. 列表样式恢复 (Tailwind 默认会把列表的点去掉，这里要加回来) */
+:deep(.markdown-body ul) {
+  list-style-type: disc;
+  padding-left: 1.25rem;
+  margin: 0.5em 0;
+}
+:deep(.markdown-body ol) {
+  list-style-type: decimal;
+  padding-left: 1.25rem;
+  margin: 0.5em 0;
 }
 </style>

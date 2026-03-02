@@ -11,9 +11,10 @@ class Settings(BaseSettings):
     DEEPSEEK_API_KEY: str = Field(..., description="DeepSeek API 密钥")
     DEEPSEEK_API_URL: str = Field(default="https://api.deepseek.com")
 
-    # 添加缺失的字段
-    PINECONE_API_KEY: str
-    PINECONE_ENV: str
+    DATABASE_URL: str = Field(..., description="PostgreSQL 数据库连接字符串")
+
+    # 必须添加这一行，类型声明为 str
+    EMBEDDING_API_KEY: str
     
     # 2. 项目基础配置
     PROJECT_NAME: str = "AI_Agent"

@@ -1,0 +1,20 @@
+version: '3.8'
+
+services:
+  # 服务名称
+  vector_db:
+    # 核心：我们不使用普通的 postgres，而是使用官方预装了 pgvector 插件的镜像
+    image: pgvector/pgvector:pg16
+    container_name: deepseek_rag_db
+    restart: always  # 宕机自动重启 (面试高频点：保证高可用)
+    environment:
+      - POSTGRES_USER=ai_user
+      - POSTGRES_PASSWORD=ai_password_2026
+      - POSTGRES_DB=rag_database
+    ports:
+      # 端口映射：宿主机端口:容器内端口
+      - "5432:5432"
+    volumes:
+      # 极其关键：数据持久化挂载
+      # 冒号左边是你在 Windows/WSL 里的文件夹，右边是 Linux 容器里的路径
+      - ./pg_data:/var/lib/postgresql/data

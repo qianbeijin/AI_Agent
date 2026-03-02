@@ -28,19 +28,10 @@ async def chat_endpoint(
     # 在流开始之前，先把用户说的话落库，确保数据安全
     MemoryService.add_message(db, session_id, "user", request.message)
 
-    # 4. 定义流式生成器 (闭包函数)
-    # 我们在这里调用 Service 层的 wrapper，把 db 传进去
-    async def generate():
-        # 调用 Service 层写好的“边吐字边存库”的方法
-        # 注意：你需要确保 memory.py 里有 stream_and_save_wrapper 这个方法
-        async for chunk in MemoryService.stream_and_save_wrapper(db, session_id, full_context):
-            yield chunk
-
-    # 5. 返回流式响应
+    # 4. 直接把 Service 层的生成器扔给 Response
+    # 去掉了中间冗余的 async def generate()
     return StreamingResponse(
-        generate(),
-        media_type="text/event-stream", # 👈 告诉浏览器：这是流，别关连接
-        headers={
-            "X-Session-Id": session_id  # 👈 技巧：把 Session ID 藏在响应头里传回去
-        }
+        MemoryService.stream_and_save_wrapper(db, session_id, full_context),
+        media_type="text/event-stream",
+        headers={"X-Session-Id": session_id}
     )
