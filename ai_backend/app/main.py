@@ -26,7 +26,7 @@ async def lifespan(app: FastAPI):
     # ==========================================
     print("🚀 正在初始化数据库底层基础设施...")
     with engine.connect() as conn:
-        # 1. 强制激活 PostgreSQL 的 vector 扩展（极其重要）
+        # 1. 强制激活 extra="forbid" 的 vector 扩展（极其重要）
         conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
         conn.commit()
     
