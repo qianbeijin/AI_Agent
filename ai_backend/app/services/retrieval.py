@@ -12,3 +12,27 @@ async def get_relevant_context(db: Session, question: str, top_k: int = 3) :
         question = question[:2000] # 直接截断，简单粗暴
 
     question_vector = await get_embedding(question)
+
+    if not question_vector:
+        return "⚠️ 抱歉，提取问题特征时发生网络异常，请重试。"
+
+    # 2. 拿着翻译好的坐标 (query_vector) 去查字典
+    try: 
+
+        results = db.query(DocumentChunk).order_by(
+            DocumentChunk.vector.op('<->')(question_vector)
+        ).limit(top_k).all()
+
+        # 3. 结果判断
+        if not results:
+            return "知识库中暂无相关上下文信息。"
+        
+        # 4. 上下文重组
+        context = "\n\n---\n\n".join([r.content for r in results])
+
+        return context
+    except Exception as e:
+        print(f"❌ 数据库检索失败: {e}")
+        return "⚠️ 知识库检索时发生系统错误。"
+
+    
