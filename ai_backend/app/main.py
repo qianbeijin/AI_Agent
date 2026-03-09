@@ -1,17 +1,15 @@
 from fastapi import FastAPI
 # 导入你的 chat 路由模块
-from app.api.v1.endpoints import chat 
+from app.api.v1.endpoints import chat, file
+
 # 导入 CORS 中间件
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
-from app.core.database import engine, Base, get_db
-# 确保导入了刚才写的 Model，否则 SQLAlchemy 扫描不到它
-from app.models.document import DocumentChunk   # noqa: F401
+from app.core.database import engine, Base
 from sqlalchemy import text
 
-from app.services.ingestion import process_and_store_document
-from fastapi import Depends
-from sqlalchemy.orm import Session
+# 【核心修复】：必须显式导入模型，否则 Base.metadata.create_all 不会建表！
+from app.models.document import DocumentChunk
 
 
 
@@ -25,14 +23,16 @@ async def lifespan(app: FastAPI):
     # 服务启动时执行：数据库初始化与向量插件激活
     # ==========================================
     print("🚀 正在初始化数据库底层基础设施...")
-    with engine.connect() as conn:
-        # 1. 强制激活 extra="forbid" 的 vector 扩展（极其重要）
-        conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
-        conn.commit()
-    
-    # 2. 根据 Model 自动在库中建立对应的表
-    Base.metadata.create_all(bind=engine)
+    async with engine.connect() as conn:
+        await conn.execution_options(isolation_level="AUTOCOMMIT")
+        # Step 1: 强行激活 pgvector 插件 (必须在最前面)
+        await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+        
+        # Step 2: 插件激活后，Postgres 认识 vector 类型了，再执行建表
+        await conn.run_sync(Base.metadata.create_all)
+
     print("✅ 数据库表同步完成，pgvector 引擎已激活！")
+
     
     yield # 这里是交接控制权给 FastAPI，服务正式运行
     
@@ -40,6 +40,8 @@ async def lifespan(app: FastAPI):
     # 服务关闭时执行：资源清理
     # ==========================================
     print("🛑 服务正在关闭...")
+    # 显式关闭并清理引擎持有的所有数据库连接资源
+    await engine.dispose()
 
 # 初始化 FastAPI 实例，注入生命周期
 app = FastAPI(
@@ -48,6 +50,7 @@ app = FastAPI(
 )
 
 app.include_router(chat.router, prefix="/api/v1", tags=["Chat"])
+app.include_router(file.router, prefix="/api/v1", tags=["Files"])
 
 # 允许跨域配置
 app.add_middleware(

@@ -2,12 +2,13 @@
 import { ref, nextTick, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 // 引入图标：确保你安装了 @element-plus/icons-vue
-import { Cpu, User, Delete, Top } from '@element-plus/icons-vue'
+import { Cpu, User, Delete, Top, Paperclip } from '@element-plus/icons-vue'
 // 引入markdown
 import MarkdownIt from 'markdown-it'
 import hljs from 'highlight.js'
 // 选择一个你喜欢的代码高亮主题（例如 github-dark 或 atom-one-dark）
 import 'highlight.js/styles/github-dark.css'
+import { changeGlobalNodesTarget } from 'element-plus/es/utils/index.mjs'
 
 // --- 数据接口 ---
 interface ChatMessage {
@@ -140,120 +141,179 @@ const clearHistory = () => {
     ElMessage.success('已清空')
   }).catch(() => {})
 }
+
+const fileList = ref([])
+const handleFileChange = async (uploadFile: any, uploadFiles: any) => {
+  // 基础防御：限制文件格式与大小 (例如 10MB)
+  if (uploadFile.size > 10 * 1024 * 1024) {
+    ElMessage.warning('文件大小不能超过 10MB')
+    fileList.value = uploadFiles.filter((file: { uid: any }) => file.uid !== uploadFile.uid)
+    return
+  }
+   // 可选：检查文件类型（例如只允许 PDF、DOCX、TXT）
+  const allowedTypes = ['application/pdf', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'text/plain']
+  if (!allowedTypes.includes(uploadFile.raw.type)) {
+    ElMessage.warning('仅支持 PDF、DOCX、TXT 格式')
+    fileList.value = uploadFiles.filter((file: { uid: any }) => file.uid !== uploadFile.uid)
+    return
+  }
+  const formData = new FormData
+  formData.append('file', uploadFile.raw)
+  try{
+    // ⚠️ 关键知识点：使用 FormData 时，绝对不要手动设置 Content-Type！
+    // 浏览器会自动将其设置为 multipart/form-data，并自动计算复杂的 boundary 边界线。
+    const response = await fetch('http://127.0.0.1:8000/api/v1/upload', {
+      method: 'POST',
+      body: formData
+    })
+    if(response.status === 'success') {
+      fileList.value.forEach(file => {
+        if(file.uid === uploadFile.uid) {
+          file.doc_id = response.doc_id
+        }
+      })
+      ElMessage.success("知识库文档上传成功")
+    }
+  }
+  catch (error: any) {
+    ElMessage.error(`上传异常: ${error.message}`)
+  }
+}
+
 </script>
 
 <template>
-  <div class="flex flex-col h-screen w-full bg-white overflow-hidden font-sans">
-    
-    <header class="shrink-0 bg-white border-b border-gray-100 flex items-center justify-center px-6 relative z-1 py-4">
-       <div class="max-w-4xl w-full flex items-center justify-between">
-        <div class="flex items-center gap-3">
-          <div class="w-10 h-10 bg-blue-50/50 rounded-xl flex items-center justify-center border border-blue-100">
-             <el-icon :size="22" class="text-blue-600"><Cpu /></el-icon>
+  <div class="h-screen flex">
+    <div class="w-100 p-6">
+      <el-upload
+        v-model:file-list="fileList"
+        class="upload-demo"
+        :auto-upload="false"
+        :on-change="handleFileChange"
+        :on-remove="handleRemove"
+        list-type="picture"
+      >
+        <el-button type="primary">Click to upload</el-button>
+        <template #tip>
+          <div class="el-upload__tip">
+            上传专属知识库文档
           </div>
-          <div class="flex flex-col">
-            <h1 class="text-xl font-bold text-gray-800 tracking-tight leading-none">DeepSeek AI</h1>
-            <div class="flex items-center gap-1.5 mt-1">
-              <span class="w-2 h-2 rounded-full bg-green-500"></span>
-              <span class="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Online</span>
+        </template>
+      </el-upload>
+    </div>
+    <div class="flex flex-col h-full  overflow-hidden font-sans">
+      
+      <header class="shrink-0 bg-white border-b border-gray-100 flex items-center justify-center px-6 relative z-1 py-4">
+        <div class="max-w-4xl w-full flex items-center justify-between">
+          <div class="flex items-center gap-3">
+            <div class="w-10 h-10 bg-blue-50/50 rounded-xl flex items-center justify-center border border-blue-100">
+              <el-icon :size="22" class="text-blue-600"><Cpu /></el-icon>
             </div>
-          </div>
-        </div>
-        <el-button circle plain size="small" class="!border-gray-200 hover:!bg-red-50 hover:!text-red-500 hover:!border-red-200 transition-colors" @click="clearHistory">
-          <el-icon><Delete /></el-icon>
-        </el-button>
-      </div>
-    </header>
-
-    <main class="flex-1 overflow-y-auto bg-[#f8f9fa] scroll-smooth">
-      <div class="w-2xl mx-auto px-4 py-8 flex flex-col gap-6">
-        
-        <div 
-          v-for="(msg, index) in messageList" 
-          :key="index"
-          class="flex w-full"
-          :class="msg.role === 'user' ? 'justify-end' : 'justify-start'"
-        >
-          <div 
-            class="flex items-start gap-3 max-w-[85%] md:max-w-[75%] min-w-0"
-            :class="msg.role === 'user' ? 'flex-row-reverse' : 'flex-row'"
-          >
-            <div 
-              class="shrink-0 w-9 h-9 rounded-lg flex items-center justify-center border shadow-sm select-none"
-              :class="msg.role === 'user' ? 'bg-gray-900 border-gray-900' : 'bg-white border-gray-200'"
-            >
-              <el-icon :size="18" :class="msg.role === 'user' ? 'text-white' : 'text-blue-600'">
-                <component :is="msg.role === 'user' ? User : Cpu" />
-              </el-icon>
-            </div>
-
-            <div class="flex flex-col min-w-0" :class="msg.role === 'user' ? 'items-end' : 'items-start'">
-              
-              <div 
-                class="px-4 py-2.5 rounded-2xl text-[15px] leading-6 shadow-[0_2px_8px_rgba(0,0,0,0.04)] break-words text-left max-w-full overflow-hidden"
-                :class="msg.role === 'user' 
-                  ? 'bg-blue-600 text-white rounded-tr-none' 
-                  : 'bg-white border border-gray-100 text-gray-800 rounded-tl-none'"
-                v-html="md.render(msg.content)"
-              >
+            <div class="flex flex-col">
+              <h1 class="text-xl font-bold text-gray-800 tracking-tight leading-none">DeepSeek AI</h1>
+              <div class="flex items-center gap-1.5 mt-1">
+                <span class="w-2 h-2 rounded-full bg-green-500"></span>
+                <span class="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Online</span>
               </div>
             </div>
           </div>
-        </div>
-
-        <div v-if="isLoading" class="flex justify-start w-full">
-           <div class="flex items-start gap-3">
-             <div class="shrink-0 w-9 h-9 rounded-lg bg-white border border-gray-200 flex items-center justify-center">
-               <el-icon :size="18" class="text-blue-600"><Cpu /></el-icon>
-             </div>
-             <div class="bg-white border border-gray-100 px-5 py-4 rounded-2xl rounded-tl-none shadow-sm">
-                <div class="flex space-x-1.5">
-                   <div class="w-2 h-2 bg-gray-300 rounded-full animate-bounce [animation-delay:-0.3s]"></div>
-                   <div class="w-2 h-2 bg-gray-300 rounded-full animate-bounce [animation-delay:-0.15s]"></div>
-                   <div class="w-2 h-2 bg-gray-300 rounded-full animate-bounce"></div>
-                </div>
-             </div>
-           </div>
-        </div>
-
-        <div ref="scrollRef" class="h-4"></div>
-      </div>
-    </main>
-
-    <footer class="shrink-0 bg-white pt-2 pb-6 px-4">
-        <div class="max-w-3xl mx-auto w-full">
-        <div class="relative flex items-end gap-2 bg-gray-100/50 hover:bg-gray-100 focus-within:bg-white focus-within:ring-2 focus-within:ring-blue-100 border border-transparent focus-within:border-blue-500 rounded-[24px] px-2 py-2 transition-all duration-200">
-          
-          <el-input
-            v-model="userInput"
-            type="textarea"
-            :autosize="{ minRows: 1, maxRows: 6 }"
-            resize="none"
-            placeholder="给 DeepSeek 发送消息..."
-            class="w-full !bg-transparent"
-            :disabled="isLoading"
-            @keydown.enter.prevent="handleSend"
-          />
-          
-          <el-button 
-            type="primary" 
-            circle 
-            class="!w-9 !h-9 !min-h-[36px] !bg-blue-600 border-none hover:!bg-blue-700 shadow-md mb-[2px] mr-[2px]"
-            :loading="isLoading"
-            :disabled="!userInput.trim()"
-            @click="handleSend"
-          >
-            <el-icon v-if="!isLoading" :size="16"><Top /></el-icon>
+          <el-button circle plain size="small" class="!border-gray-200 hover:!bg-red-50 hover:!text-red-500 hover:!border-red-200 transition-colors" @click="clearHistory">
+            <el-icon><Delete /></el-icon>
           </el-button>
         </div>
+      </header>
 
-        <p class="text-center text-[11px] text-gray-400 mt-3">
-          Powered by DeepSeek V3 · Generated content may be inaccurate
-        </p>
-      </div>
-    </footer>
+      <main class="flex-1 overflow-y-auto bg-[#f8f9fa] scroll-smooth">
+        <div class="w-2xl mx-auto px-4 py-8 flex flex-col gap-6">
+          
+          <div 
+            v-for="(msg, index) in messageList" 
+            :key="index"
+            class="flex w-full"
+            :class="msg.role === 'user' ? 'justify-end' : 'justify-start'"
+          >
+            <div 
+              class="flex items-start gap-3 max-w-[85%] md:max-w-[75%] min-w-0"
+              :class="msg.role === 'user' ? 'flex-row-reverse' : 'flex-row'"
+            >
+              <div 
+                class="shrink-0 w-9 h-9 rounded-lg flex items-center justify-center border shadow-sm select-none"
+                :class="msg.role === 'user' ? 'bg-gray-900 border-gray-900' : 'bg-white border-gray-200'"
+              >
+                <el-icon :size="18" :class="msg.role === 'user' ? 'text-white' : 'text-blue-600'">
+                  <component :is="msg.role === 'user' ? User : Cpu" />
+                </el-icon>
+              </div>
 
+              <div class="flex flex-col min-w-0" :class="msg.role === 'user' ? 'items-end' : 'items-start'">
+                
+                <div 
+                  class="px-4 py-2.5 rounded-2xl text-[15px] leading-6 shadow-[0_2px_8px_rgba(0,0,0,0.04)] break-words text-left max-w-full overflow-hidden"
+                  :class="msg.role === 'user' 
+                    ? 'bg-blue-600 text-white rounded-tr-none' 
+                    : 'bg-white border border-gray-100 text-gray-800 rounded-tl-none'"
+                  v-html="md.render(msg.content)"
+                >
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div v-if="isLoading" class="flex justify-start w-full">
+            <div class="flex items-start gap-3">
+              <div class="shrink-0 w-9 h-9 rounded-lg bg-white border border-gray-200 flex items-center justify-center">
+                <el-icon :size="18" class="text-blue-600"><Cpu /></el-icon>
+              </div>
+              <div class="bg-white border border-gray-100 px-5 py-4 rounded-2xl rounded-tl-none shadow-sm">
+                  <div class="flex space-x-1.5">
+                    <div class="w-2 h-2 bg-gray-300 rounded-full animate-bounce [animation-delay:-0.3s]"></div>
+                    <div class="w-2 h-2 bg-gray-300 rounded-full animate-bounce [animation-delay:-0.15s]"></div>
+                    <div class="w-2 h-2 bg-gray-300 rounded-full animate-bounce"></div>
+                  </div>
+              </div>
+            </div>
+          </div>
+
+          <div ref="scrollRef" class="h-4"></div>
+        </div>
+      </main>
+
+      <footer class="shrink-0 bg-white pt-2 pb-6 px-4">
+          <div class="max-w-3xl mx-auto w-full">
+          <div class="relative flex items-end gap-2 bg-gray-100/50 hover:bg-gray-100 focus-within:bg-white focus-within:ring-2 focus-within:ring-blue-100 border border-transparent focus-within:border-blue-500 rounded-[24px] px-2 py-2 transition-all duration-200">
+            
+            <el-input
+              v-model="userInput"
+              type="textarea"
+              :autosize="{ minRows: 1, maxRows: 6 }"
+              resize="none"
+              placeholder="给 DeepSeek 发送消息..."
+              class="w-full !bg-transparent"
+              :disabled="isLoading"
+              @keydown.enter.prevent="handleSend"
+            />
+            
+            <el-button 
+              type="primary" 
+              circle 
+              class="!w-9 !h-9 !min-h-[36px] !bg-blue-600 border-none hover:!bg-blue-700 shadow-md mb-[2px] mr-[2px]"
+              :loading="isLoading"
+              :disabled="!userInput.trim()"
+              @click="handleSend"
+            >
+              <el-icon v-if="!isLoading" :size="16"><Top /></el-icon>
+            </el-button>
+          </div>
+
+          <p class="text-center text-[11px] text-gray-400 mt-3">
+            Powered by DeepSeek V3 · Generated content may be inaccurate
+          </p>
+        </div>
+      </footer>
+
+    </div>
   </div>
+    
 </template>
 
 <style scoped>

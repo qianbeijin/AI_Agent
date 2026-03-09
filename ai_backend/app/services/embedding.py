@@ -23,7 +23,7 @@ async def get_embedding(text: str) -> list[float]:
     # 使用 async with 可确保：请求结束后自动关闭; 连接释放内存和网络资源; 避免连接泄漏（尤其在高并发场景）
     async with httpx.AsyncClient() as client:
         try:
-            response = client.post(
+            response = await client.post(
                 SILICONFLOW_URL,
                 json = payload,
                 headers = headers,
@@ -35,7 +35,6 @@ async def get_embedding(text: str) -> list[float]:
 
             # http返回的通常是文本，虽然看起来像list或dist，因此需要将其转化为list或dict
             data = response.json()
-            print(data)
 
             # 核心：从返回的嵌套字典中提取出那串 1024 维的数字
             # 返回格式通常是：{"data": [{"embedding": [...]}]}

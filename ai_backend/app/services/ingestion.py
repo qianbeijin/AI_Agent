@@ -1,14 +1,20 @@
 from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.exc import SQLAlchemyError # 导入数据库专门的异常
 from app.models.document import DocumentChunk  # 确保路径正确
 from app.services.embedding import get_embedding  # 将翻译方法导入
 import re  # 导入正则
 import uuid # 引入 UUID 库生成唯一标识
 
-async def process_and_store_document(db: Session, content: str, source: str, overlap: int, chunk_size: int) -> int:
-
-    # 生成文档级唯一的uuid
-    document_id = str(uuid.uuid4())
+async def process_and_store_document(
+        db: AsyncSession, 
+        doc_id: str,
+        content: str, 
+        source: str, 
+        metadata: dict, 
+        overlap: int, 
+        chunk_size: int
+) -> int:
     
     # 1. 数据清洗
     # 将文本中的连续换行符替换为单换行，去除两端空格
@@ -37,27 +43,28 @@ async def process_and_store_document(db: Session, content: str, source: str, ove
                 
                 if vector:
                     new_chunk = DocumentChunk(
-                        doc_id=document_id, # 使用 UUID
+                        doc_id=doc_id, # 使用 UUID
                         content=chunk_text,
                         vector=vector,
                         source_file=source,
-                        metadata={"chunk_index": i, "total_chunks": len(chunks)}
+                        metadata_={**metadata, "chunk_index": i, "total_chunks": len(chunks)}
                     )
+                    # db.add(new_chunk) 不需要 await，因为它只是将对象放入内存中的 Identity Map，不产生真实的网络通信
                     db.add(new_chunk)
                     successful_chunks += 1
                     
             except Exception as api_err:
                 # 某一个片段 API 调用失败，记录日志，但【跳过】，不要卡死整个文档
-                print(f"⚠️ 第 {i} 个片段向量化失败，跳过: {api_err}")
+                print(f"⚠️ 第 {i+1} 个片段向量化失败，跳过: {api_err}")
                 continue 
 
         # 4. 提交事务 (只有在循环全结束，且没有发生致命异常时才提交)
-        db.commit()
+        await db.commit()
         print(f"🚀 文档 {source} 注入完毕！成功: {successful_chunks}/{len(chunks)}")
         return successful_chunks
 
     except SQLAlchemyError as db_err:
         # 规范 3：发生数据库级别错误，必须立刻回滚！
-        db.rollback()
+        await db.rollback()
         print(f"❌ 数据库写入发生致命错误，已回滚: {db_err}")
         raise # 把异常抛给更上层（如路由组件）去给前端返回 500 错误

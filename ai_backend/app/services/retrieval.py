@@ -1,9 +1,10 @@
-from sqlalchemy.orm import Session
-from models.document import DocumentChunk
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
+from app.models.document import DocumentChunk
 from app.services.embedding import get_embedding
 
 # top_k限定只要相似度最高的前三条
-async def get_relevant_context(db: Session, question: str, top_k: int = 3) :
+async def get_relevant_context(db: AsyncSession, question: str, top_k: int = 3) :
     """
     RAG 核心检索函数：将问题转为向量，并去数据库捞取最相似的片段
     """
@@ -19,9 +20,20 @@ async def get_relevant_context(db: Session, question: str, top_k: int = 3) :
     # 2. 拿着翻译好的坐标 (query_vector) 去查字典
     try: 
 
-        results = db.query(DocumentChunk).order_by(
-            DocumentChunk.vector.op('<->')(question_vector)
-        ).limit(top_k).all()
+        # db: Session 是 SQLAlchemy 的同步 Session， 在 async def 函数中直接调用它，会阻塞整个 asyncio 事件循环，失去异步优势
+        # 异步查询必须用 await + execute()
+        # results = db.query(DocumentChunk).order_by(
+        #     DocumentChunk.vector.op('<->')(question_vector)
+        # ).limit(top_k).all()
+
+         # 构造异步查询
+        stmt = (
+            select(DocumentChunk)
+            .order_by(DocumentChunk.vector.op('<->')(question_vector))
+            .limit(top_k)
+        )
+        result = await db.execute(stmt)  # 👈 必须 await
+        results = result.scalars().all()  # 提取对象列表
 
         # 3. 结果判断
         if not results:
