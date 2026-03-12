@@ -11,6 +11,8 @@ class ChatRequest(BaseModel):
     # session_id 可选。如果是第一次对话，前端可能不传，由后端生成返回
     session_id: Optional[str] = Field(default=None, description="会话唯一标识")
     message: str = Field(..., min_length=1, description="用户发送的内容")
+    # 🌟 新增：允许前端传入选中的文档 ID；如果不传或传 null，代表进行全局检索
+    doc_id: Optional[str] = None
 
 # 返回给前端的数据格式
 class ChatResponse(BaseModel):

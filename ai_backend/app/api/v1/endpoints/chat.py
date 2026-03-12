@@ -9,8 +9,6 @@ from app.schemas.chat import ChatRequest
 from app.services.memory import MemoryService
 from app.services.retrieval import get_relevant_context
 
-from app.services.llm import get_deepseek_response
-
 router = APIRouter()
 
 @router.post("/chat") # 注意：这里去掉了 response_model=ChatResponse，因为返回的是流
@@ -24,12 +22,17 @@ async def chat_endpoint(
 
     # 1. 确定 Session ID
     session_id = request.session_id
+    print(session_id)
     if not session_id:
         session_id = MemoryService.create_session()
 
     # 1.根据用户的问题进行向量化检索
-    context = await get_relevant_context(db=db, question=request.message, top_k=3)
-    print(context)
+    context = await get_relevant_context(
+        db=db, 
+        question=request.message,
+        top_k=3,
+        doc_id=request.doc_id  # 👈 新增这个参数
+    )
 
     # 2.Prompt组装
     # 核心防御：必须在系统提示词中圈定模型的知识边界，防止AI乱回答
@@ -45,17 +48,18 @@ async def chat_endpoint(
     # history = MemoryService.get_history(db, session_id)
     system_prompt = {"role": "system", "content": prompt}
     current_message = {"role": "user", "content": request.message}
-    
-    full_context = [system_prompt] + [current_message]
+
+    message_history = await MemoryService.get_history(db, session_id) 
+    full_context = [system_prompt]+ message_history + [current_message]
 
     # # 3. 【关键变化】先存用户的消息
     # # 在流开始之前，先把用户说的话落库，确保数据安全
-    # MemoryService.add_message(db, session_id, "user", request.message)
+    await MemoryService.add_message(db, session_id, "user", request.message)
     
     # 4. 直接把 Service 层的生成器扔给 Response
     # 去掉了中间冗余的 async def generate()
     return StreamingResponse(
-        get_deepseek_response(full_context),
+        MemoryService.stream_and_save_wrapper(db, session_id, full_context),
         media_type="text/event-stream",
         headers={"X-Session-Id": session_id}
     )

@@ -1,8 +1,10 @@
 <script setup lang="ts">
-import { ref, nextTick, watch } from 'vue'
+
+import { ref, nextTick, watch, onMounted } from 'vue'
+import axios from 'axios'
 import { ElMessage, ElMessageBox } from 'element-plus'
 // 引入图标：确保你安装了 @element-plus/icons-vue
-import { Cpu, User, Delete, Top, Paperclip } from '@element-plus/icons-vue'
+import { Cpu, User, Delete, Top, Paperclip, Document, Upload } from '@element-plus/icons-vue'
 // 引入markdown
 import MarkdownIt from 'markdown-it'
 import hljs from 'highlight.js'
@@ -68,12 +70,13 @@ const handleSend = async () => {
       body: JSON.stringify({
         message: content,
         // 如果有 session_id 就带上，没有传 null
-        session_id: sessionId.value ? sessionId.value : null 
+        session_id: sessionId.value ? sessionId.value : null,
+        doc_id: selectedFileId.value ? selectedFileId.value : null 
       })
     })
 
     if (!response.ok) {
-      throw new Error('Network response was not ok')
+      throw new Error('网络错误')
     }
     isLoading.value = false
 
@@ -157,22 +160,15 @@ const handleFileChange = async (uploadFile: any, uploadFiles: any) => {
     fileList.value = uploadFiles.filter((file: { uid: any }) => file.uid !== uploadFile.uid)
     return
   }
-  const formData = new FormData
+  const formData = new FormData()
   formData.append('file', uploadFile.raw)
   try{
     // ⚠️ 关键知识点：使用 FormData 时，绝对不要手动设置 Content-Type！
     // 浏览器会自动将其设置为 multipart/form-data，并自动计算复杂的 boundary 边界线。
-    const response = await fetch('http://127.0.0.1:8000/api/v1/upload', {
-      method: 'POST',
-      body: formData
-    })
-    if(response.status === 'success') {
-      fileList.value.forEach(file => {
-        if(file.uid === uploadFile.uid) {
-          file.doc_id = response.doc_id
-        }
-      })
+    const { data } = await axios.post('http://127.0.0.1:8000/api/v1/upload', formData);
+    if(data.status === 'success') {
       ElMessage.success("知识库文档上传成功")
+      await getFileList();
     }
   }
   catch (error: any) {
@@ -180,29 +176,130 @@ const handleFileChange = async (uploadFile: any, uploadFiles: any) => {
   }
 }
 
+const getFileList = async () => {
+  const { data } = await axios.get('http://127.0.0.1:8000/api/v1/documents')
+  if(data.status === 'success') {
+    fileList.value = data.data.map(item => ({
+      name: item.filename,   // 👈 Element Plus 强依赖这个字段来显示名字
+      doc_id: item.doc_id,   // 我们自己偷偷存下 doc_id，将来点“删除”按钮时要用
+      status: 'success',     // 👈 告诉组件：“这文件早就传完了，别给我显示 loading 转圈圈”
+      uid: item.doc_id       // 用 doc_id 顶替底层的 uid，保证唯一性
+    }))
+  }
+}
+getFileList()
+
+const selectedFileId = ref('')
+const selectFile = (file: any) => {
+  if(selectedFileId.value === file.uid) {
+    selectedFileId.value = ''
+    return
+  }
+  selectedFileId.value = file.uid
+}
+
+const handleDelete = async (file: any) => {
+  try {
+    // 工业级防误触确认框
+    await ElMessageBox.confirm(
+      `确定要从知识库中永久删除文档 "${file.name}" 吗？`, 
+      '删除确认', 
+      {
+        confirmButtonText: '狠心删除',
+        cancelButtonText: '取消',
+        type: 'warning',
+        confirmButtonClass: 'el-button--danger'
+      }
+    )
+
+    // 发起后端删除请求 (注意：你需要确保后端写了这个 DELETE 接口)
+    const { data } = await axios.delete(`http://127.0.0.1:8000/api/v1/delete/${file.doc_id}`)
+    
+    if (data.status === 'success') {
+      // 从前端数组中剔除该文件，Vue 会自动更新界面
+      fileList.value = fileList.value.filter(f => f.uid !== file.uid)
+      // 如果删除的正好是当前选中的文件，清空选中状态
+      if (selectedFileId.value === file.uid) {
+        selectedFileId.value = ''
+      }
+      ElMessage.success('文档已彻底删除')
+    } else {
+      ElMessage.error(data.message || '删除失败')
+    }
+  } catch (error) {
+    if (error !== 'cancel') {
+      console.error('删除报错:', error)
+      ElMessage.error('服务器通讯异常')
+    }
+  }
+}
+
 </script>
 
 <template>
   <div class="h-screen flex">
-    <div class="w-100 p-6">
-      <el-upload
-        v-model:file-list="fileList"
-        class="upload-demo"
-        :auto-upload="false"
-        :on-change="handleFileChange"
-        :on-remove="handleRemove"
-        list-type="picture"
-      >
-        <el-button type="primary">Click to upload</el-button>
-        <template #tip>
-          <div class="el-upload__tip">
-            上传专属知识库文档
-          </div>
-        </template>
-      </el-upload>
-    </div>
-    <div class="flex flex-col h-full  overflow-hidden font-sans">
+   <div class="w-80 flex flex-col border-r border-gray-100 shrink-0">
       
+      <div class="p-5 border-b border-gray-50">
+        <h2 class="text-sm font-bold text-gray-800 mb-4 tracking-wider uppercase">知识库管理</h2>
+        
+        <el-upload
+          class="w-full"
+          :auto-upload="false"
+          :on-change="handleFileChange"
+          :show-file-list="false" 
+          accept=".pdf,.txt,.docx"
+        >
+          <div class="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-blue-50 text-blue-600 rounded-xl border border-blue-100 hover:bg-blue-100 hover:border-blue-200 transition-colors cursor-pointer font-medium text-sm">
+            <el-icon :size="16"><Upload /></el-icon>
+            上传文档
+          </div>
+        </el-upload>
+      </div>
+
+      <div class="flex-1 overflow-y-auto p-4 space-y-2">
+        
+        <div v-if="fileList.length === 0" class="flex flex-col items-center justify-center h-40 text-gray-400">
+          <el-icon :size="32" class="mb-2 opacity-50"><Document /></el-icon>
+          <span class="text-xs">知识库空空如也</span>
+        </div>
+
+        <div 
+          v-for="file in fileList" 
+          :key="file.uid"
+          @click="selectFile(file)"
+          class="group relative flex items-center justify-between p-3 rounded-xl border cursor-pointer transition-all duration-200 ease-out"
+          :class="[
+            selectedFileId === file.uid 
+              ? 'bg-blue-50 border-blue-200 text-blue-700 shadow-sm' 
+              : 'bg-white border-transparent hover:bg-gray-50 hover:border-gray-200 text-gray-700'
+          ]"
+        >
+          <div class="flex items-center gap-3 overflow-hidden">
+            <div 
+              class="w-8 h-8 rounded-lg flex items-center justify-center shrink-0 transition-colors"
+              :class="selectedFileId === file.uid ? 'bg-blue-100 text-blue-600' : 'bg-gray-100 text-gray-500 group-hover:bg-white'"
+            >
+              <el-icon :size="16"><Document /></el-icon>
+            </div>
+            <span class="truncate text-[13px] font-medium select-none">{{ file.name }}</span>
+          </div>
+
+          <el-button
+            @click.stop="handleDelete(file)"
+            type="danger" 
+            text 
+            circle 
+            class="!p-1.5 opacity-0 group-hover:opacity-100 transition-opacity absolute right-2 bg-white/80 backdrop-blur-sm"
+          >
+            <el-icon><Delete /></el-icon>
+          </el-button>
+        </div>
+
+      </div>
+    </div>
+
+    <div class="flex flex-col h-full  overflow-hidden font-sans">
       <header class="shrink-0 bg-white border-b border-gray-100 flex items-center justify-center px-6 relative z-1 py-4">
         <div class="max-w-4xl w-full flex items-center justify-between">
           <div class="flex items-center gap-3">

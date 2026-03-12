@@ -2,9 +2,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from app.models.document import DocumentChunk
 from app.services.embedding import get_embedding
+import uuid
 
 # top_k限定只要相似度最高的前三条
-async def get_relevant_context(db: AsyncSession, question: str, top_k: int = 3) :
+async def get_relevant_context(db: AsyncSession, question: str, top_k: int = 3, doc_id: str = None) :
     """
     RAG 核心检索函数：将问题转为向量，并去数据库捞取最相似的片段
     """
@@ -26,14 +27,20 @@ async def get_relevant_context(db: AsyncSession, question: str, top_k: int = 3) 
         #     DocumentChunk.vector.op('<->')(question_vector)
         # ).limit(top_k).all()
 
-         # 构造异步查询
-        stmt = (
-            select(DocumentChunk)
-            .order_by(DocumentChunk.vector.op('<->')(question_vector))
-            .limit(top_k)
-        )
+        # 构造异步查询
+        stmt = select(DocumentChunk)
+        if(doc_id) :
+            # 如果前端传了 doc_id，就只在这篇文档里搜
+            # 不管前端传来的是什么妖魔鬼怪，强行转成纯字符串，并去掉首尾空格
+            clean_doc_id = str(doc_id).strip()
+            stmt = stmt.filter(DocumentChunk.doc_id == clean_doc_id)
+        stmt = stmt.order_by(
+            DocumentChunk.vector.op('<->')(question_vector)
+        ).limit(top_k)
+
         result = await db.execute(stmt)  # 👈 必须 await
         results = result.scalars().all()  # 提取对象列表
+
 
         # 3. 结果判断
         if not results:
@@ -44,6 +51,7 @@ async def get_relevant_context(db: AsyncSession, question: str, top_k: int = 3) 
 
         return context
     except Exception as e:
+        await db.rollback()
         print(f"❌ 数据库检索失败: {e}")
         return "⚠️ 知识库检索时发生系统错误。"
 
